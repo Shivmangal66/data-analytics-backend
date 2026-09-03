@@ -220,7 +220,50 @@ app.get("/", (req, res) => {
     });
 
 });
+// ===============================
+// PREMIUM ACCESS CHECK
+// ===============================
 
+app.get("/api/premium-access", (req, res) => {
+
+    try {
+
+        const purchases = JSON.parse(
+            fs.readFileSync(PURCHASE_FILE, "utf8")
+        );
+
+        const paid = purchases.some(
+            purchase =>
+                purchase.status === "PAID" &&
+                purchase.course === "Data Analytics Full Course"
+        );
+
+        if (paid) {
+            return res.json({
+                success: true,
+                access: true,
+                message: "Premium access granted"
+            });
+        }
+
+        return res.status(403).json({
+            success: false,
+            access: false,
+            message: "Payment required"
+        });
+
+    } catch (error) {
+
+        console.error("Premium access error:", error);
+
+        return res.status(500).json({
+            success: false,
+            access: false,
+            message: "Server error"
+        });
+    }
+
+});
 app.listen(PORT, () => {
 
     console.log(
