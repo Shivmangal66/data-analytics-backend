@@ -9,8 +9,15 @@ const path = require("path");
 const app = express();
 
 const PORT = process.env.PORT || 3000;
+
 const FRONTEND_URL =
-    process.env.FRONTEND_URL || "https://shivmangal66.github.io";
+    process.env.FRONTEND_URL ||
+    "https://shivmangal66.github.io";
+
+
+// ===============================
+// DATA STORAGE
+// ===============================
 
 const DATA_DIR = path.join(__dirname, "data");
 const PURCHASE_FILE = path.join(DATA_DIR, "purchases.json");
@@ -23,18 +30,30 @@ if (!fs.existsSync(PURCHASE_FILE)) {
     fs.writeFileSync(PURCHASE_FILE, "[]");
 }
 
-app.use(cors({
-    origin: FRONTEND_URL
-}));
+
+// ===============================
+// CORS
+// ===============================
+
+app.use(
+    cors({
+        origin: FRONTEND_URL
+    })
+);
+
 
 // ===============================
 // RAZORPAY WEBHOOK
-// IMPORTANT: RAW BODY MUST COME FIRST
+// ===============================
+// IMPORTANT:
+// RAW BODY MUST COME BEFORE express.json()
 // ===============================
 
 app.post(
     "/api/razorpay/webhook",
-    express.raw({ type: "application/json" }),
+    express.raw({
+        type: "application/json"
+    }),
     (req, res) => {
 
         try {
@@ -47,8 +66,16 @@ app.post(
             const eventId =
                 req.headers["x-razorpay-event-id"];
 
+
+            // -------------------------------
+            // Check Signature
+            // -------------------------------
+
             if (!signature) {
-                console.log("Missing Razorpay signature");
+
+                console.log(
+                    "Missing Razorpay signature"
+                );
 
                 return res.status(400).json({
                     success: false,
@@ -56,48 +83,90 @@ app.post(
                 });
             }
 
+
+            // -------------------------------
+            // Webhook Secret
+            // -------------------------------
+
             const secret =
                 process.env.RAZORPAY_WEBHOOK_SECRET;
 
             if (!secret) {
-                console.log("Webhook secret missing");
+
+                console.log(
+                    "Webhook secret missing"
+                );
 
                 return res.status(500).json({
                     success: false,
-                    message: "Webhook secret not configured"
+                    message:
+                        "Webhook secret not configured"
                 });
             }
 
-            // Verify Razorpay signature
+
+            // -------------------------------
+            // Verify HMAC Signature
+            // -------------------------------
+
             const expectedSignature =
                 crypto
-                    .createHmac("sha256", secret)
+                    .createHmac(
+                        "sha256",
+                        secret
+                    )
                     .update(req.body)
                     .digest("hex");
 
+
             if (
-                expectedSignature.length !== signature.length ||
+                expectedSignature.length !==
+                    signature.length ||
                 !crypto.timingSafeEqual(
-                    Buffer.from(expectedSignature),
-                    Buffer.from(signature)
+                    Buffer.from(
+                        expectedSignature
+                    ),
+                    Buffer.from(
+                        signature
+                    )
                 )
             ) {
 
-                console.log("Invalid webhook signature");
+                console.log(
+                    "Invalid webhook signature"
+                );
 
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid signature"
+                    message:
+                        "Invalid signature"
                 });
             }
 
-            console.log("Webhook signature verified");
 
-            // Parse only AFTER signature verification
+            console.log(
+                "Webhook signature verified"
+            );
+
+
+            // -------------------------------
+            // Parse Webhook
+            // -------------------------------
+
             const event =
-                JSON.parse(req.body.toString());
+                JSON.parse(
+                    req.body.toString()
+                );
 
-            console.log("Event:", event.event);
+            console.log(
+                "Event:",
+                event.event
+            );
+
+
+            // -------------------------------
+            // Read Purchases
+            // -------------------------------
 
             let purchases =
                 JSON.parse(
@@ -107,33 +176,54 @@ app.post(
                     )
                 );
 
-            // Prevent duplicate events
+
+            // -------------------------------
+            // Prevent Duplicate Events
+            // -------------------------------
+
             if (
                 eventId &&
                 purchases.some(
                     item =>
-                        item.webhookEventId === eventId
+                        item.webhookEventId ===
+                        eventId
                 )
             ) {
 
-                console.log("Duplicate webhook ignored");
+                console.log(
+                    "Duplicate webhook ignored"
+                );
 
                 return res.status(200).json({
                     success: true
                 });
             }
 
-            // Payment Link Paid
-            if (event.event === "payment_link.paid") {
+
+            // -------------------------------
+            // PAYMENT LINK PAID
+            // -------------------------------
+
+            if (
+                event.event ===
+                "payment_link.paid"
+            ) {
 
                 const paymentLink =
-                    event.payload?.payment_link?.entity;
+                    event.payload
+                        ?.payment_link
+                        ?.entity;
 
                 const payment =
-                    event.payload?.payment?.entity;
+                    event.payload
+                        ?.payment
+                        ?.entity;
 
                 const order =
-                    event.payload?.order?.entity;
+                    event.payload
+                        ?.order
+                        ?.entity;
+
 
                 const record = {
 
@@ -156,7 +246,8 @@ app.post(
                         payment?.amount || 0,
 
                     currency:
-                        payment?.currency || "INR",
+                        payment?.currency ||
+                        "INR",
 
                     status:
                         "PAID",
@@ -168,7 +259,9 @@ app.post(
                         new Date().toISOString()
                 };
 
+
                 purchases.push(record);
+
 
                 fs.writeFileSync(
                     PURCHASE_FILE,
@@ -179,16 +272,20 @@ app.post(
                     )
                 );
 
+
                 console.log(
                     "Payment received:",
                     record
                 );
             }
 
+
             return res.status(200).json({
                 success: true,
-                message: "Webhook processed"
+                message:
+                    "Webhook processed"
             });
+
 
         } catch (error) {
 
@@ -199,272 +296,386 @@ app.post(
 
             return res.status(500).json({
                 success: false,
-                message: "Webhook processing failed"
+                message:
+                    "Webhook processing failed"
             });
         }
     }
 );
 
+
 // ===============================
-// JSON FOR NORMAL API ROUTES
+// NORMAL JSON API
 // ===============================
 
 app.use(express.json());
 
+
+// ===============================
+// HOME
+// ===============================
+
 app.get("/", (req, res) => {
 
     res.json({
+
         success: true,
+
         message:
             "Data Analytics Hub Backend is running!"
+
     });
 
 });
+
+
 // ===============================
-// PREMIUM ACCESS - RAZORPAY API CHECK
+// PREMIUM ACCESS
+// RAZORPAY API VERIFICATION
 // ===============================
 
-app.get("/api/premium-access", async (req, res) => {
+app.get(
+    "/api/premium-access",
+    async (req, res) => {
 
-    try {
+        try {
 
-        const keyId = process.env.RAZORPAY_KEY_ID;
-        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+            // -------------------------------
+            // Razorpay API Credentials
+            // -------------------------------
 
-        if (!keyId || !keySecret) {
+            const keyId =
+                process.env.RAZORPAY_KEY_ID;
 
-            return res.status(500).json({
-                success: false,
-                access: false,
-                message: "Razorpay API credentials missing"
-            });
+            const keySecret =
+                process.env.RAZORPAY_KEY_SECRET;
 
-        }
 
-        // Your ₹11 Payment Link
-        const targetPaymentLink =
-            "https://rzp.io/rzp/yUd8pYbJ";
+            if (!keyId || !keySecret) {
 
-        // Razorpay API Authentication
-        const auth =
-            Buffer
-                .from(`${keyId}:${keySecret}`)
-                .toString("base64");
+                console.log(
+                    "Razorpay API credentials missing"
+                );
 
-        // Fetch Payment Links
-        const response = await fetch(
-            "https://api.razorpay.com/v1/payment_links/?count=100",
-            {
-                method: "GET",
-                headers: {
-                    "Authorization": `Basic ${auth}`,
-                    "Content-Type": "application/json"
-                }
+                return res.status(500).json({
+
+                    success: false,
+
+                    access: false,
+
+                    message:
+                        "Razorpay API credentials missing"
+
+                });
             }
-        );
 
-        if (!response.ok) {
 
-            const errorText = await response.text();
+            // -------------------------------
+            // YOUR PAYMENT LINK
+            // -------------------------------
 
-            console.error(
-                "Razorpay API Error:",
-                errorText
-            );
+            const targetPaymentLink =
+                "https://rzp.io/rzp/yUd8pYbJ";
 
-            return res.status(500).json({
-                success: false,
-                access: false,
-                message: "Unable to verify Razorpay payment"
-            });
 
-        }
+            // -------------------------------
+            // Razorpay Authentication
+            // -------------------------------
 
-        const data = await response.json();
+            const auth =
+                Buffer
+                    .from(
+                        `${keyId}:${keySecret}`
+                    )
+                    .toString("base64");
 
-        // Find our ₹11 Payment Link
-        const paymentLink =
-            data.payment_links?.find(
-                link =>
-                    link.short_url === targetPaymentLink
-            );
 
-        if (!paymentLink) {
+            // -------------------------------
+            // Get Payment Links
+            // -------------------------------
+
+            const response =
+                await fetch(
+                    "https://api.razorpay.com/v1/payment_links/?count=100",
+                    {
+
+                        method: "GET",
+
+                        headers: {
+
+                            "Authorization":
+                                `Basic ${auth}`,
+
+                            "Content-Type":
+                                "application/json"
+
+                        }
+
+                    }
+                );
+
+
+            // -------------------------------
+            // API Error
+            // -------------------------------
+
+            if (!response.ok) {
+
+                const errorText =
+                    await response.text();
+
+                console.error(
+                    "Razorpay API Error:",
+                    errorText
+                );
+
+                return res.status(500).json({
+
+                    success: false,
+
+                    access: false,
+
+                    message:
+                        "Unable to verify Razorpay payment"
+
+                });
+            }
+
+
+            // -------------------------------
+            // Read Razorpay Response
+            // -------------------------------
+
+            const data =
+                await response.json();
+
+
+            // -------------------------------
+            // Find Our Payment Link
+            // -------------------------------
+
+            const paymentLink =
+                data.payment_links?.find(
+                    link =>
+                        link.short_url ===
+                        targetPaymentLink
+                );
+
+
+            if (!paymentLink) {
+
+                console.log(
+                    "Payment link not found"
+                );
+
+                return res.status(403).json({
+
+                    success: false,
+
+                    access: false,
+
+                    message:
+                        "Payment link not found"
+
+                });
+            }
+
+
+            // -------------------------------
+            // Show Payment Information
+            // -------------------------------
 
             console.log(
-                "Payment link not found"
+                "Payment Link ID:",
+                paymentLink.id
             );
 
-            return res.status(403).json({
-                success: false,
-                access: false,
-                message: "Payment link not found"
-            });
+            console.log(
+                "Payment Link Status:",
+                paymentLink.status
+            );
 
-        }
+            console.log(
+                "Amount Paid:",
+                paymentLink.amount_paid
+            );
 
-        console.log(
-            "Payment Link Status:",
-            paymentLink.status
-        );
 
-        console.log(
-            "Amount Paid:",
-            paymentLink.amount_paid
-        );
+            // -------------------------------
+            // ₹11 = 1100 PAISE
+            // -------------------------------
 
-        // ₹11 = 1100 paise
-        const paid =
-            paymentLink.status === "paid" &&
-            Number(paymentLink.amount_paid) >= 1100;
+            const paid =
+                paymentLink.status ===
+                    "paid" &&
+                Number(
+                    paymentLink.amount_paid
+                ) >= 1100;
 
-        if (paid) {
 
-            // Save verified payment locally
-            let purchases =
-                JSON.parse(
-                    fs.readFileSync(
+            // ===============================
+            // PAYMENT SUCCESS
+            // ===============================
+
+            if (paid) {
+
+                console.log(
+                    "✅ PAYMENT VERIFIED"
+                );
+
+
+                // -------------------------------
+                // Read Existing Purchases
+                // -------------------------------
+
+                let purchases =
+                    JSON.parse(
+                        fs.readFileSync(
+                            PURCHASE_FILE,
+                            "utf8"
+                        )
+                    );
+
+
+                // -------------------------------
+                // Check Already Saved
+                // -------------------------------
+
+                const alreadySaved =
+                    purchases.some(
+                        purchase =>
+                            purchase.paymentLinkId ===
+                            paymentLink.id
+                    );
+
+
+                // -------------------------------
+                // Save Payment
+                // -------------------------------
+
+                if (!alreadySaved) {
+
+                    purchases.push({
+
+                        paymentLinkId:
+                            paymentLink.id,
+
+                        amount:
+                            paymentLink.amount_paid,
+
+                        currency:
+                            paymentLink.currency ||
+                            "INR",
+
+                        status:
+                            "PAID",
+
+                        course:
+                            "Data Analytics Full Course",
+
+                        verifiedBy:
+                            "Razorpay API",
+
+                        createdAt:
+                            new Date().toISOString()
+
+                    });
+
+
+                    fs.writeFileSync(
+
                         PURCHASE_FILE,
-                        "utf8"
-                    )
-                );
 
-            const alreadySaved =
-                purchases.some(
-                    purchase =>
-                        purchase.paymentLinkId ===
-                        paymentLink.id
-                );
+                        JSON.stringify(
+                            purchases,
+                            null,
+                            2
+                        )
 
-            if (!alreadySaved) {
+                    );
 
-                purchases.push({
 
-                    paymentLinkId:
-                        paymentLink.id,
+                    console.log(
+                        "Payment saved successfully"
+                    );
+                }
 
-                    amount:
-                        paymentLink.amount_paid,
 
-                    currency:
-                        paymentLink.currency || "INR",
+                // -------------------------------
+                // GRANT ACCESS
+                // -------------------------------
 
-                    status:
-                        "PAID",
+                return res.json({
 
-                    course:
-                        "Data Analytics Full Course",
+                    success: true,
 
-                    verifiedBy:
-                        "Razorpay API",
+                    access: true,
 
-                    createdAt:
-                        new Date().toISOString()
+                    message:
+                        "Premium access granted"
 
                 });
 
-                fs.writeFileSync(
-                    PURCHASE_FILE,
-                    JSON.stringify(
-                        purchases,
-                        null,
-                        2
-                    )
-                );
-
             }
 
+
+            // ===============================
+            // PAYMENT NOT SUCCESSFUL
+            // ===============================
+
             console.log(
-                "✅ PAYMENT VERIFIED"
+                "❌ PAYMENT NOT VERIFIED"
             );
 
-            return res.json({
 
-                success: true,
+            return res.status(403).json({
 
-                access: true,
+                success: false,
+
+                access: false,
 
                 message:
-                    "Premium access granted"
+                    "Payment required"
+
+            });
+
+
+        } catch (error) {
+
+            console.error(
+                "Premium Access Error:",
+                error
+            );
+
+
+            return res.status(500).json({
+
+                success: false,
+
+                access: false,
+
+                message:
+                    "Server error"
 
             });
 
         }
+
+    }
+);
+
+
+// ===============================
+// START SERVER
+// ===============================
+
+app.listen(
+    PORT,
+    () => {
 
         console.log(
-            "❌ PAYMENT NOT VERIFIED"
+            `Server running on port ${PORT}`
         );
-
-        return res.status(403).json({
-
-            success: false,
-
-            access: false,
-
-            message:
-                "Payment required"
-
-        });
-
-    } catch (error) {
-
-        console.error(
-            "Premium Access Error:",
-            error
-        );
-
-        return res.status(500).json({
-
-            success: false,
-
-            access: false,
-
-            message:
-                "Server error"
-
-        });
 
     }
-
-});
-
-
-        const paid = purchases.some(
-            purchase =>
-                purchase.status === "PAID" &&
-                purchase.course === "Data Analytics Full Course"
-        );
-
-        if (paid) {
-            return res.json({
-                success: true,
-                access: true,
-                message: "Premium access granted"
-            });
-        }
-
-        return res.status(403).json({
-            success: false,
-            access: false,
-            message: "Payment required"
-        });
-
-    } catch (error) {
-
-        console.error("Premium access error:", error);
-
-        return res.status(500).json({
-            success: false,
-            access: false,
-            message: "Server error"
-        });
-    }
-
-});
-app.listen(PORT, () => {
-
-    console.log(
-        `Server running on port ${PORT}`
-    );
-
-});
+);
