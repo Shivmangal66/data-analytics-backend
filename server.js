@@ -12,10 +12,6 @@ const PORT = process.env.PORT || 3000;
 const FRONTEND_URL =
     process.env.FRONTEND_URL || "https://shivmangal66.github.io";
 
-// ===============================
-// DATA FILE
-// ===============================
-
 const DATA_DIR = path.join(__dirname, "data");
 const PURCHASE_FILE = path.join(DATA_DIR, "purchases.json");
 
@@ -27,118 +23,109 @@ if (!fs.existsSync(PURCHASE_FILE)) {
     fs.writeFileSync(PURCHASE_FILE, "[]");
 }
 
-// ===============================
-// CORS
-// ===============================
-
-app.use(
-    cors({
-        origin: FRONTEND_URL
-    })
-);
-
-// ===============================
-// HOME
-// ===============================
-
-app.get("/", (req, res) => {
-    res.json({
-        success: true,
-        message: "Data Analytics Hub Backend is running!"
-    });
-});
+app.use(cors({
+    origin: FRONTEND_URL
+}));
 
 // ===============================
 // RAZORPAY WEBHOOK
+// IMPORTANT: RAW BODY MUST COME FIRST
 // ===============================
 
 app.post(
     "/api/razorpay/webhook",
     express.raw({ type: "application/json" }),
     (req, res) => {
+
         try {
-            const webhookSignature =
+
+            console.log("Webhook received");
+
+            const signature =
                 req.headers["x-razorpay-signature"];
 
-            const webhookEventId =
+            const eventId =
                 req.headers["x-razorpay-event-id"];
 
-            // Signature missing
-            if (!webhookSignature) {
+            if (!signature) {
+                console.log("Missing Razorpay signature");
+
                 return res.status(400).json({
                     success: false,
-                    message: "Missing Razorpay signature"
+                    message: "Missing signature"
                 });
             }
 
-            // Webhook secret check
-            if (!process.env.RAZORPAY_WEBHOOK_SECRET) {
+            const secret =
+                process.env.RAZORPAY_WEBHOOK_SECRET;
+
+            if (!secret) {
+                console.log("Webhook secret missing");
+
                 return res.status(500).json({
                     success: false,
-                    message: "Webhook secret is not configured"
+                    message: "Webhook secret not configured"
                 });
             }
 
-            // Generate expected signature
-            const expectedSignature = crypto
-                .createHmac(
-                    "sha256",
-                    process.env.RAZORPAY_WEBHOOK_SECRET
-                )
-                .update(req.body)
-                .digest("hex");
-
-            // Compare signatures safely
-            const expectedBuffer = Buffer.from(
-                expectedSignature,
-                "utf8"
-            );
-
-            const receivedBuffer = Buffer.from(
-                webhookSignature,
-                "utf8"
-            );
+            // Verify Razorpay signature
+            const expectedSignature =
+                crypto
+                    .createHmac("sha256", secret)
+                    .update(req.body)
+                    .digest("hex");
 
             if (
-                expectedBuffer.length !== receivedBuffer.length ||
+                expectedSignature.length !== signature.length ||
                 !crypto.timingSafeEqual(
-                    expectedBuffer,
-                    receivedBuffer
+                    Buffer.from(expectedSignature),
+                    Buffer.from(signature)
                 )
             ) {
+
+                console.log("Invalid webhook signature");
+
                 return res.status(400).json({
                     success: false,
-                    message: "Invalid webhook signature"
+                    message: "Invalid signature"
                 });
             }
 
-            // Convert body to JSON
-            const event = JSON.parse(req.body.toString());
+            console.log("Webhook signature verified");
 
-            // Read existing purchases
-            let purchases = JSON.parse(
-                fs.readFileSync(PURCHASE_FILE, "utf8")
-            );
+            // Parse only AFTER signature verification
+            const event =
+                JSON.parse(req.body.toString());
 
-            // Prevent duplicate webhook
+            console.log("Event:", event.event);
+
+            let purchases =
+                JSON.parse(
+                    fs.readFileSync(
+                        PURCHASE_FILE,
+                        "utf8"
+                    )
+                );
+
+            // Prevent duplicate events
             if (
-                webhookEventId &&
+                eventId &&
                 purchases.some(
                     item =>
-                        item.webhookEventId === webhookEventId
+                        item.webhookEventId === eventId
                 )
             ) {
+
+                console.log("Duplicate webhook ignored");
+
                 return res.status(200).json({
-                    success: true,
-                    message: "Duplicate event ignored"
+                    success: true
                 });
             }
 
-            // ===============================
-            // PAYMENT LINK PAID
-            // ===============================
-
+            // Payment Link Paid
             if (event.event === "payment_link.paid") {
+
                 const paymentLink =
                     event.payload?.payment_link?.entity;
 
@@ -149,10 +136,12 @@ app.post(
                     event.payload?.order?.entity;
 
                 const record = {
-                    webhookEventId:
-                        webhookEventId || null,
 
-                    event: event.event,
+                    webhookEventId:
+                        eventId || null,
+
+                    event:
+                        event.event,
 
                     paymentLinkId:
                         paymentLink?.id || null,
@@ -169,7 +158,8 @@ app.post(
                     currency:
                         payment?.currency || "INR",
 
-                    status: "PAID",
+                    status:
+                        "PAID",
 
                     course:
                         "Data Analytics Full Course",
@@ -182,7 +172,11 @@ app.post(
 
                 fs.writeFileSync(
                     PURCHASE_FILE,
-                    JSON.stringify(purchases, null, 2)
+                    JSON.stringify(
+                        purchases,
+                        null,
+                        2
+                    )
                 );
 
                 console.log(
@@ -193,7 +187,7 @@ app.post(
 
             return res.status(200).json({
                 success: true,
-                message: "Webhook received successfully"
+                message: "Webhook processed"
             });
 
         } catch (error) {
@@ -212,11 +206,25 @@ app.post(
 );
 
 // ===============================
-// START SERVER
+// JSON FOR NORMAL API ROUTES
 // ===============================
 
+app.use(express.json());
+
+app.get("/", (req, res) => {
+
+    res.json({
+        success: true,
+        message:
+            "Data Analytics Hub Backend is running!"
+    });
+
+});
+
 app.listen(PORT, () => {
+
     console.log(
-        `Data Analytics Hub Backend running on port ${PORT}`
+        `Server running on port ${PORT}`
     );
+
 });
