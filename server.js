@@ -221,16 +221,213 @@ app.get("/", (req, res) => {
 
 });
 // ===============================
-// PREMIUM ACCESS CHECK
+// PREMIUM ACCESS - RAZORPAY API CHECK
 // ===============================
 
-app.get("/api/premium-access", (req, res) => {
+app.get("/api/premium-access", async (req, res) => {
 
     try {
 
-        const purchases = JSON.parse(
-            fs.readFileSync(PURCHASE_FILE, "utf8")
+        const keyId = process.env.RAZORPAY_KEY_ID;
+        const keySecret = process.env.RAZORPAY_KEY_SECRET;
+
+        if (!keyId || !keySecret) {
+
+            return res.status(500).json({
+                success: false,
+                access: false,
+                message: "Razorpay API credentials missing"
+            });
+
+        }
+
+        // Your ₹11 Payment Link
+        const targetPaymentLink =
+            "https://rzp.io/rzp/yUd8pYbJ";
+
+        // Razorpay API Authentication
+        const auth =
+            Buffer
+                .from(`${keyId}:${keySecret}`)
+                .toString("base64");
+
+        // Fetch Payment Links
+        const response = await fetch(
+            "https://api.razorpay.com/v1/payment_links/?count=100",
+            {
+                method: "GET",
+                headers: {
+                    "Authorization": `Basic ${auth}`,
+                    "Content-Type": "application/json"
+                }
+            }
         );
+
+        if (!response.ok) {
+
+            const errorText = await response.text();
+
+            console.error(
+                "Razorpay API Error:",
+                errorText
+            );
+
+            return res.status(500).json({
+                success: false,
+                access: false,
+                message: "Unable to verify Razorpay payment"
+            });
+
+        }
+
+        const data = await response.json();
+
+        // Find our ₹11 Payment Link
+        const paymentLink =
+            data.payment_links?.find(
+                link =>
+                    link.short_url === targetPaymentLink
+            );
+
+        if (!paymentLink) {
+
+            console.log(
+                "Payment link not found"
+            );
+
+            return res.status(403).json({
+                success: false,
+                access: false,
+                message: "Payment link not found"
+            });
+
+        }
+
+        console.log(
+            "Payment Link Status:",
+            paymentLink.status
+        );
+
+        console.log(
+            "Amount Paid:",
+            paymentLink.amount_paid
+        );
+
+        // ₹11 = 1100 paise
+        const paid =
+            paymentLink.status === "paid" &&
+            Number(paymentLink.amount_paid) >= 1100;
+
+        if (paid) {
+
+            // Save verified payment locally
+            let purchases =
+                JSON.parse(
+                    fs.readFileSync(
+                        PURCHASE_FILE,
+                        "utf8"
+                    )
+                );
+
+            const alreadySaved =
+                purchases.some(
+                    purchase =>
+                        purchase.paymentLinkId ===
+                        paymentLink.id
+                );
+
+            if (!alreadySaved) {
+
+                purchases.push({
+
+                    paymentLinkId:
+                        paymentLink.id,
+
+                    amount:
+                        paymentLink.amount_paid,
+
+                    currency:
+                        paymentLink.currency || "INR",
+
+                    status:
+                        "PAID",
+
+                    course:
+                        "Data Analytics Full Course",
+
+                    verifiedBy:
+                        "Razorpay API",
+
+                    createdAt:
+                        new Date().toISOString()
+
+                });
+
+                fs.writeFileSync(
+                    PURCHASE_FILE,
+                    JSON.stringify(
+                        purchases,
+                        null,
+                        2
+                    )
+                );
+
+            }
+
+            console.log(
+                "✅ PAYMENT VERIFIED"
+            );
+
+            return res.json({
+
+                success: true,
+
+                access: true,
+
+                message:
+                    "Premium access granted"
+
+            });
+
+        }
+
+        console.log(
+            "❌ PAYMENT NOT VERIFIED"
+        );
+
+        return res.status(403).json({
+
+            success: false,
+
+            access: false,
+
+            message:
+                "Payment required"
+
+        });
+
+    } catch (error) {
+
+        console.error(
+            "Premium Access Error:",
+            error
+        );
+
+        return res.status(500).json({
+
+            success: false,
+
+            access: false,
+
+            message:
+                "Server error"
+
+        });
+
+    }
+
+});
+
 
         const paid = purchases.some(
             purchase =>
